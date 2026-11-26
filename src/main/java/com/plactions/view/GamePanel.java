@@ -12,7 +12,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
-import java.util.ArrayList;
 import java.util.List;
 
 public class GamePanel extends JPanel {
@@ -28,32 +27,80 @@ public class GamePanel extends JPanel {
     private final SoundPlayer soundPlayer = new SoundAdapter();
     private int gravityCounter = 0;
 
-    // Карты уровней (ровно по 16 символов в каждой строке)
-    private final List<String[]> levels = List.of(
-            new String[]{
-                    "WWWWWWWWWWWWWWWW",
-                    "WAAAAAAAAAAAAAAW",
-                    "WAAAAAAAAAAAAEAW",
-                    "WAAAAAAAAAAWWWWW",
-                    "WAAAAAAAAAAAAAAW",
-                    "WAAAAAASSSAAAAAW",
-                    "WPAAAAWWWWAAAAAW",
-                    "WWWWWWWWWWWWWWWW",
-                    "WWWWWWWWWWWWWWWW",
-                    "WWWWWWWWWWWWWWWW"
-            },
-            new String[]{
-                    "WWWWWWWWWWWWWWWW",
-                    "WAAAAAAALAAAAAAW",
-                    "WAAAAAAALAAAAEAW",
-                    "WAAAAAAALAAWWWWW",
-                    "WAAAAAAAAAAAAAAW",
-                    "WPAAAASSSSAAAAAW",
-                    "WWWWWWWWWWWWWWWW",
-                    "WWWWWWWWWWWWWWWW",
-                    "WWWWWWWWWWWWWWWW",
-                    "WWWWWWWWWWWWWWWW"
-            }
+    // Вспомогательный класс для хранения карты уровня и набора команд для него
+    private record LevelData(String[] map, List<ActionCommand> commands) {}
+
+    private final List<LevelData> levels = List.of(
+            // УРОВЕНЬ 1: Учимся перепрыгивать шипы и забираться на уступ
+            // Прохождение: подойти к стене -> SPACE (JUMP) -> SPACE (DASH ->) -> пройти вправо -> SPACE (JUMP) -> SPACE (DASH ->) -> выход
+            new LevelData(
+                    new String[]{
+                            "WWWWWWWWWWWWWWWW",
+                            "WAAAAAAAAAAAAAAW",
+                            "WAAAAAAAAAAAAEAW",
+                            "WAAAAAAAAAAWWWWW",
+                            "WAAAAAAAAAAAAAAW",
+                            "WAAAAAASSAAAAAAW",
+                            "WPAAAAWWWWAAAAAW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW"
+                    },
+                    List.of(
+                            new JumpCommand(),
+                            new DashCommand(1),
+                            new JumpCommand(),
+                            new DashCommand(1)
+                    )
+            ),
+
+            // УРОВЕНЬ 2: Лазер (State ON/OFF) + шипы
+            // Прохождение: дождаться пока лазер станет тёмным (OFF) -> пройти через него -> перепрыгнуть шипы к выходу
+            new LevelData(
+                    new String[]{
+                            "WWWWWWWWWWWWWWWW",
+                            "WAAAAALAAAAAAAAW",
+                            "WAAAAALAAAAAAAAW",
+                            "WAAAAALAAAAAAEAW",
+                            "WAAAAALAAAAWWWWW",
+                            "WPAAAALASSAAAAAW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW"
+                    },
+                    List.of(
+                            new JumpCommand(),
+                            new DashCommand(1),
+                            new JumpCommand(),
+                            new DashCommand(1)
+                    )
+            ),
+
+            // УРОВЕНЬ 3: Подъём зигзагом (используем рывок вправо и рывок влево)
+            // Прохождение: забраться на 1-й этаж вправо -> развернуться и забраться на 2-й этаж влево к выходу
+            new LevelData(
+                    new String[]{
+                            "WWWWWWWWWWWWWWWW",
+                            "WAEAAAAAAAAAAAAW",
+                            "WWWWWAAAAAAAAAAW",
+                            "WAAAAAAAAAAAAAAW",
+                            "WAAAAAAAWWWWWWWW",
+                            "WAAAAAAAAAAAAAAW",
+                            "WPAAASSAAAAAAAAW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW",
+                            "WWWWWWWWWWWWWWWW"
+                    },
+                    List.of(
+                            new JumpCommand(),
+                            new DashCommand(1),
+                            new JumpCommand(),
+                            new DashCommand(-1),
+                            new JumpCommand(),
+                            new DashCommand(-1)
+                    )
+            )
     );
 
     public GamePanel() {
@@ -84,8 +131,10 @@ public class GamePanel extends JPanel {
         levelManager.clearResetFlag();
         levelManager.clearNextLevelFlag();
         levelManager.resetStatus();
+        gravityCounter = 0;
 
-        String[] map = levels.get((levelNumber - 1) % levels.size());
+        LevelData data = levels.get((levelNumber - 1) % levels.size());
+        String[] map = data.map();
         int startX = 1, startY = 1;
 
         for (int r = 0; r < ROWS; r++) {
@@ -103,13 +152,29 @@ public class GamePanel extends JPanel {
 
         player = new Player(startX, startY);
 
-        // Набор доступных команд на уровень (главная фишка Plactions)
-        List<ActionCommand> commands = new ArrayList<>();
-        commands.add(new JumpCommand());
-        commands.add(new DashCommand(1));
-        commands.add(new JumpCommand());
-        commands.add(new DashCommand(1));
-        actionQueue.setCommands(commands);
+        // Создаём свежие экземпляры команд для уровня
+        actionQueue.setCommands(createCommandsForLevel(levelNumber));
+    }
+
+    private List<ActionCommand> createCommandsForLevel(int levelNumber) {
+        int index = (levelNumber - 1) % levels.size();
+        return switch (index) {
+            case 0, 1 -> List.of(
+                    new JumpCommand(),
+                    new DashCommand(1),
+                    new JumpCommand(),
+                    new DashCommand(1)
+            );
+            case 2 -> List.of(
+                    new JumpCommand(),
+                    new DashCommand(1),
+                    new JumpCommand(),
+                    new DashCommand(-1),
+                    new JumpCommand(),
+                    new DashCommand(-1)
+            );
+            default -> List.of(new JumpCommand(), new DashCommand(1));
+        };
     }
 
     private void handleInput(int keyCode) {
@@ -125,17 +190,18 @@ public class GamePanel extends JPanel {
         } else if (keyCode == KeyEvent.VK_RIGHT) {
             tryMove(1, 0);
         } else if (keyCode == KeyEvent.VK_SPACE) {
-            // Выполнить следующее действие из очереди Command
             if (actionQueue.executeNext(player)) {
                 soundPlayer.playAction();
+                // Даём игроку зависнуть в воздухе на ~0.5 сек, чтобы успеть нажать Dash после Jump
+                gravityCounter = -18;
                 clampPlayerPosition();
                 checkTileInteractions();
             } else {
                 levelManager.onOutOfActions();
             }
         } else if (keyCode == KeyEvent.VK_Z) {
-            // Undo последнего действия
             actionQueue.undoLast(player);
+            gravityCounter = -15;
             levelManager.resetStatus();
         }
     }
@@ -161,13 +227,13 @@ public class GamePanel extends JPanel {
     }
 
     private void updateGame() {
-        levelComposite.update(); // Обновляем лазеры (State) через Composite
+        levelComposite.update();
 
         if (player.getState() == Player.PlayerState.DEAD) return;
 
-        // Простая гравитация
+        // Гравитация с задержкой после прыжка/рывка
         gravityCounter++;
-        if (gravityCounter >= 15) {
+        if (gravityCounter >= 14) {
             gravityCounter = 0;
             int belowY = player.getY() + 1;
             if (belowY < ROWS && !grid[belowY][player.getX()].isSolid()) {
@@ -202,13 +268,9 @@ public class GamePanel extends JPanel {
         super.paintComponent(g);
         Graphics2D g2d = (Graphics2D) g;
 
-        // Отрисовка всего уровня через паттерн Composite
         levelComposite.render(g2d, TILE_SIZE);
-
-        // Отрисовка игрока
         player.render(g2d, TILE_SIZE);
 
-        // Нижняя панель интерфейса (очередь команд и статус)
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font("Monospaced", Font.BOLD, 14));
         g2d.drawString(levelManager.getStatusMessage(), 15, ROWS * TILE_SIZE + 22);
